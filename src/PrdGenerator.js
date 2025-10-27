@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { trackGeneration, getSessionGenerationCountbyType, getSessionGenerationCountByType } from './analytics';
+import { trackGenerationWithTokens, getSessionGenerationCountByType } from './analytics';
+import { callClaudeAPI, validateContent, calculateCost } from './claudeService';
+import { generatePRDPrompt } from './prompts';
 
 export default function PrdGenerator() {
   const [formData, setFormData] = useState({
@@ -111,138 +113,73 @@ Viral Coefficient`
     setOpenSections(prev => ({ ...prev, [section]: !prev[section] }));
   };
 
+  
   const generatePrd = async () => {
-    if (!formData.productName.trim() || !formData.problemStatement.trim() || !formData.businessGoal) {
-      alert('Please fill in Product Name, Problem Statement, and Business Goal!');
-      return;
+  if (!formData.productName.trim() || !formData.problemStatement.trim() || !formData.businessGoal) {
+    alert('Please fill in Product Name, Problem Statement, and Business Goal!');
+    return;
+  }
+
+  if (generationCount >= 5) {
+    alert('🎉 You\'ve used your 5 free PRDs!\n\n💡 Good news: You still have 5 free User Story generations!\n\nTry the User Story Generator or sign up for unlimited access to both.');
+    return;
+  }
+
+  setIsGenerating(true);
+
+  try {
+    // Generate prompt
+    const prompt = generatePRDPrompt(formData, template);
+    
+    // Call Claude API
+    const response = await callClaudeAPI(prompt, 3000); // PRDs need more tokens
+    
+    // Validate content
+    const validation = validateContent(response.content, 'prd');
+    
+    if (!validation.passed) {
+      console.warn('⚠️ Generated PRD failed validation:', validation.checks);
     }
+    
+    // Calculate cost
+    const cost = calculateCost(response.usage);
+    
+    setGeneratedPrd(response.content);
+    setIsGenerating(false);
 
-    // Check if user hit the limit (5 free tries)
-    if (generationCount >= 5) {
-      alert('🎉 You\'ve used your 5 free tries! Sign up to continue generating unlimited PRDs.');
-      return;
-    }
-    setIsGenerating(true);
-
-     setTimeout(async () => {
-      const date = new Date().toLocaleDateString();
-      let prd = `# PRODUCT REQUIREMENTS DOCUMENT
-## ${formData.productName}
-
-**Last Updated:** ${date}
-**Status:** Draft
-**Version:** 1.0
-
----
-
-## 🎯 SECTION 1: THE OPPORTUNITY (Why)
-
-### 1.1 Problem Statement
-${formData.problemStatement}
-
-### 1.2 Customer Narrative
-${formData.narrative || 'Customers currently face challenges with manual processes. This leads to inefficiency and frustration.'}
-
-### 1.3 Impact Sizing Model
-${formData.impactSizing || 'Target market: 10,000 users, 20% adoption, $79 ARPU = $189K Year 1 revenue'}
-
-### 1.4 Metrics
-**North Star:** ${formData.metrics.split('\n')[0] || 'Weekly Active Users'}
-**Secondary:** ${formData.metrics.split('\n').slice(1).join(', ') || 'Activation rate, Time to value, NPS'}
-
----
-
-## 👥 SECTION 2: THE CUSTOMER (Who)
-
-### 2.1 Target Users
-**Primary:** ${formData.targetUsersPrimary || 'Product Managers at tech companies'}
-**Secondary:** ${formData.targetUsersSecondary || 'N/A'}
-
-### 2.2 Known Information
-${formData.knownInfo || 'User research to be conducted during discovery phase.'}
-
----
-
-## 🎨 SECTION 3: THE SOLUTION (What)
-
-### 3.1 Goals
-${formData.goals || '1. Reduce time by 80%\n2. 500 users in Q1\n3. $10K MRR by month 3'}
-
-### 3.2 Non-Goals
-${formData.nonGoals || 'Mobile app in v1, Enterprise features, Legacy integrations'}
-
-### 3.3 High Level Approach
-${formData.highLevelApproach || 'Build AI-powered web app with freemium model.'}
-
-### 3.4 Solution Alignment
-${formData.solutionAlignment || 'In Scope: Core features, auth, payments. Out of Scope: Mobile apps, enterprise.'}
-
-### 3.5 Key Features
-${formData.keyFeatures || 'P0: Core functionality, auth, payment\nP1: History, analytics\nP2: Team features, API'}
-
-### 3.6 Future Considerations
-${formData.futureConsiderations || 'v2: Integrations, v3: Mobile apps, Long-term: AI personalization'}
-
----
-
-## ⚙️ SECTION 4: THE DETAILS (How)
-
-### 4.1 Key Flows
-${formData.keyFlows || 'Sign-up → Dashboard → Generate → View results → Export/Save'}
-
-### 4.2 Key Logic
-${formData.keyLogic || 'Free: 5/month, Pro: Unlimited. Handle empty input, API failures, rate limits.'}
-
-### 4.3 Technical Requirements
-${formData.technicalReqs || 'React, Node.js, PostgreSQL, Claude API. Performance: <2s load, 99.9% uptime.'}
-
-### 4.4 Dependencies
-${formData.dependencies || 'Claude API, Stripe, Auth0/Firebase'}
-
----
-
-## 📅 SECTION 5: THE EXECUTION (When)
-
-### 5.1 Launch Plan
-${formData.launchPlan || 'Phase 1: Private beta (6 weeks), Phase 2: Public beta (12 weeks), Phase 3: Full launch'}
-
-### 5.2 Milestones
-${formData.milestones || 'Week 1-2: Design, Week 3-6: Build, Week 6: Beta launch, Week 12: Public launch'}
-
-### 5.3 Risks & Mitigation
-${formData.risks || 'API costs → caching, Low adoption → freemium, Competition → fast iteration'}
-
-### 5.4 Success Criteria
-${formData.successCriteria || 'Month 1: 500 users, Month 3: $5K MRR, Month 6: $15K MRR'}
-
----
-
-**Document Owner:** Product Team`;
-
-      setGeneratedPrd(prd);
-      setIsGenerating(false);
-      
-      await trackGeneration({
+    // Track with full data
+    await trackGenerationWithTokens({
       type: 'prd',
       template: template,
       businessGoal: formData.businessGoal === 'custom' ? formData.customGoal : formData.businessGoal,
       input: formData.problemStatement,
-      output: prd,
-      success: true
+      output: response.content,
+      success: true,
+      tokensUsed: response.usage,
+      cost: cost,
+      model: response.model,
+      validationScore: validation.passed ? 1 : 0
     });
 
+    // Update count
     const newCount = await getSessionGenerationCountByType('prd');
     setGenerationCount(newCount);
 
+    // Show warnings
     if (newCount === 3) {
-      setTimeout(() => alert('💡 You have 2 free generations left!'), 500);
+      setTimeout(() => alert('💡 You have 2 free PRDs left!'), 500);
     } else if (newCount === 4) {
-      setTimeout(() => alert('⚠️ This is your last free generation!'), 500);
+      setTimeout(() => alert('⚠️ This is your last free PRD!'), 500);
     }
 
-
-    }, 2500);
-  };
+    console.log('💰 Generation cost: $' + cost.toFixed(4));
+    
+  } catch (error) {
+    console.error('Error generating PRD:', error);
+    setIsGenerating(false);
+    alert(`Error: ${error.message}\n\nPlease try again or check your API configuration.`);
+  }
+};
 
   const copyToClipboard = () => {
     navigator.clipboard.writeText(generatedPrd);

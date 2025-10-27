@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { trackGeneration, getSessionGenerationCountByType } from './analytics';
+import { trackGenerationWithTokens, getSessionGenerationCountByType } from './analytics';
+import { callClaudeAPI, validateContent, calculateCost } from './claudeService';
+import { generateUserStoryPrompt } from './prompts';
 
 export default function UserStoryGenerator() {
   const [featureDescription, setFeatureDescription] = useState('');
@@ -16,105 +18,76 @@ export default function UserStoryGenerator() {
 
   useEffect(() => {
     // Load generation count on mount
-    getSessionGenerationCountByType('user-story').then(count => setGenerationCount(count));
+    getSessionGenerationCountByType('user_story').then(count => setGenerationCount(count));
   }, []);
 
   const generateStory = async () => {
-    if (!featureDescription.trim()) {
-      alert('Please describe your feature first!');
-      return;
+  if (!featureDescription.trim()) {
+    alert('Please describe your feature first!');
+    return;
+  }
+
+  if (generationCount >= 5) {
+    alert('🎉 You\'ve used your 5 free user stories!\n\n💡 Good news: You still have 5 free PRD generations!\n\nTry the PRD Generator or sign up for unlimited access to both.');
+    return;
+  }
+
+  setIsGenerating(true);
+
+  try {
+    // Generate prompt
+    const prompt = generateUserStoryPrompt(featureDescription, template);
+    
+    // Call Claude API (or mock)
+    const response = await callClaudeAPI(prompt, 1000);
+    
+    // Validate content
+    const validation = validateContent(response.content, 'user_story');
+    
+    if (!validation.passed) {
+      console.warn('⚠️ Generated content failed validation:', validation.checks);
+      // Could retry here or show warning to user
+    }
+    
+    // Calculate cost
+    const cost = calculateCost(response.usage);
+    
+    setGeneratedStory(response.content);
+    setIsGenerating(false);
+
+    // Track with full data
+    await trackGenerationWithTokens({
+      type: 'user_story',
+      template: template,
+      input: featureDescription,
+      output: response.content,
+      success: true,
+      tokensUsed: response.usage,
+      cost: cost,
+      model: response.model,
+      validationScore: validation.passed ? 1 : 0
+    });
+
+    // Update count
+    const newCount = await getSessionGenerationCountByType('user_story');
+    setGenerationCount(newCount);
+
+    // Show warnings
+    if (newCount === 3) {
+      setTimeout(() => alert('💡 You have 2 free user stories left!'), 500);
+    } else if (newCount === 4) {
+      setTimeout(() => alert('⚠️ This is your last free user story!'), 500);
     }
 
-    // Check if user hit the limit (5 free tries)
-    if (generationCount >= 5) {
-      alert('🎉 You\'ve used your 5 free tries! Sign up to continue generating unlimited user stories.');
-      // TODO: Show signup modal here
-      return;
-    }
+    console.log('💰 Generation cost: $' + cost.toFixed(4));
+    
+  } catch (error) {
+    console.error('Error generating story:', error);
+    setIsGenerating(false);
+    alert(`Error: ${error.message}\n\nPlease try again or check your API configuration.`);
+  }
+};
 
-    setIsGenerating(true);
-
-    // Simulate AI generation (we'll connect real AI tomorrow)
-    setTimeout(async () => {
-      let story = '';
-      
-      if (template === 'scrum') {
-        story = `USER STORY:
-As a user,
-I want to ${featureDescription}
-So that I can accomplish my goals more efficiently.
-
-ACCEPTANCE CRITERIA:
-- Given I am on the main page
-- When I ${featureDescription}
-- Then the system should respond appropriately
-- And I should see confirmation of the action
-
-DEFINITION OF DONE:
-✓ Feature implemented and tested
-✓ Code reviewed and merged
-✓ Documentation updated
-✓ User acceptance testing completed`;
-      } else if (template === 'jtbd') {
-        story = `JOBS-TO-BE-DONE FORMAT:
-
-When I [situation],
-I want to [motivation],
-So I can [expected outcome].
-
-CONTEXT:
-${featureDescription}
-
-SUCCESS CRITERIA:
-- User can complete the job efficiently
-- System provides clear feedback
-- Edge cases are handled gracefully`;
-      } else {
-        story = `FEATURE: ${featureDescription}
-
-DESCRIPTION:
-This feature allows users to ${featureDescription}.
-
-REQUIREMENTS:
-1. User can initiate the action
-2. System processes the request
-3. User receives feedback
-4. Action is logged for tracking
-
-TESTING NOTES:
-- Test happy path
-- Test edge cases
-- Verify error handling`;
-      }
-
-      setGeneratedStory(story);
-      setIsGenerating(false);
-
-      // Track this generation
-      await trackGeneration({
-        type: 'user_story',
-        template: template,
-        input: featureDescription,
-        output: story,
-        success: true
-      });
-
-      // Update count
-      const newCount = await getSessionGenerationCountByType('user_story');
-      setGenerationCount(newCount);
-
-      // Show warning if approaching limit
-      if (newCount === 3) {
-        setTimeout(() => {
-          alert('💡 You have 2 free generations left. Sign up for unlimited access!');
-        }, 500);
-      } else if (newCount === 4) {
-        setTimeout(() => {
-          alert('⚠️ This is your last free generation. Sign up to keep creating!');
-        }, 500);
-      }
-    }, 2000);
-  };
 
   const copyToClipboard = () => {
     navigator.clipboard.writeText(generatedStory);
@@ -156,7 +129,8 @@ TESTING NOTES:
   )}
   {generationCount >= 5 && (
     <p className="text-xs text-blue-700 mt-2 font-semibold">
-      🎉 User story limit reached! You still have 5 free PRD generations. Sign up for unlimited!
+      {/* add feedback here */}
+      🎉 User story limit reached! You still have 5 free PRD generations. Sign up for unlimited!  
     </p>
   )}
 </div>

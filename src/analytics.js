@@ -177,3 +177,38 @@ export const getSessionGenerationCount = async () => {
     return 0;
   }
 };
+
+// Add to analytics.js
+
+// Track generation with token usage
+export const trackGenerationWithTokens = async (data) => {
+  try {
+    const sessionId = getSessionId();
+    const genId = 'gen_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
+    const generationData = {
+      id: genId,
+      sessionId,
+      type: data.type,
+      template: data.template,
+      businessGoal: data.businessGoal || null,
+      inputLength: data.input?.length || 0,
+      outputLength: data.output?.length || 0,
+      timestamp: new Date().toISOString(),
+      success: data.success !== false,
+      // NEW: Token tracking
+      tokensUsed: data.tokensUsed || null,
+      cost: data.cost || null,
+      model: data.model || null,
+      validationScore: data.validationScore || null
+    };
+
+    await storage.set(`generation:${genId}`, JSON.stringify(generationData), true);
+    console.log('📊 Generation tracked with tokens:', genId, generationData);
+
+    return genId;
+  } catch (error) {
+    console.error('Error tracking generation:', error);
+    return null;
+  }
+};

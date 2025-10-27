@@ -53,6 +53,12 @@ export default function AdminDashboard() {
         }
       }
 
+        const totalCost = generations.reduce((sum, g) => {
+        // Use actual cost if available, otherwise estimate
+        const cost = g.cost ? parseFloat(g.cost) : (g.type === 'user_story' ? 0.006 : 0.033);
+        return sum + cost;
+        }, 0);
+
       // Calculate analytics
       const now = new Date();
       const today = now.toDateString();
@@ -68,12 +74,6 @@ export default function AdminDashboard() {
 
       const userStories = generations.filter(g => g.type === 'user_story').length;
       const prds = generations.filter(g => g.type === 'prd').length;
-
-      // Calculate costs (estimates based on token usage)
-      const totalCost = generations.reduce((sum, g) => {
-        const cost = g.type === 'user_story' ? 0.006 : 0.033;
-        return sum + cost;
-      }, 0);
 
       // Top referrers
       const referrerCounts = {};
