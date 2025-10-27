@@ -1,3 +1,34 @@
+# AI PM Tools
+
+AI-powered tools for Product Managers to generate User Stories and PRDs.
+
+## 🔐 Security Note
+
+This is a public repository. Sensitive configuration is stored in `.env` files which are not committed to version control.
+
+For local development:
+1. Copy `.env.example` to `.env`
+2. Add your own API keys and passwords
+
+## 🚀 Features
+
+- User Story Generator (5 free tries)
+- PRD Generator (5 free tries)
+- Analytics Dashboard
+- Usage tracking
+
+## 🛠️ Tech Stack
+
+- React
+- Tailwind CSS (CDN)
+- Claude API (coming soon)
+- localStorage for analytics
+
+
+
+
+
+
 # Getting Started with Create React App
 
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).

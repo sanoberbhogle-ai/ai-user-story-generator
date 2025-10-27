@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { trackGeneration, getSessionGenerationCountByType } from './analytics';
 
 export default function UserStoryGenerator() {
   const [featureDescription, setFeatureDescription] = useState('');
   const [template, setTemplate] = useState('scrum');
   const [generatedStory, setGeneratedStory] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [generationCount, setGenerationCount] = useState(0);
 
   const templates = {
     scrum: 'Scrum Format',
@@ -12,16 +14,28 @@ export default function UserStoryGenerator() {
     simple: 'Simple Format'
   };
 
+  useEffect(() => {
+    // Load generation count on mount
+    getSessionGenerationCountByType('user-story').then(count => setGenerationCount(count));
+  }, []);
+
   const generateStory = async () => {
     if (!featureDescription.trim()) {
       alert('Please describe your feature first!');
       return;
     }
 
+    // Check if user hit the limit (5 free tries)
+    if (generationCount >= 5) {
+      alert('🎉 You\'ve used your 5 free tries! Sign up to continue generating unlimited user stories.');
+      // TODO: Show signup modal here
+      return;
+    }
+
     setIsGenerating(true);
 
-    // Simulate AI generation (we'll connect real AI in Week 2)
-    setTimeout(() => {
+    // Simulate AI generation (we'll connect real AI tomorrow)
+    setTimeout(async () => {
       let story = '';
       
       if (template === 'scrum') {
@@ -75,6 +89,30 @@ TESTING NOTES:
 
       setGeneratedStory(story);
       setIsGenerating(false);
+
+      // Track this generation
+      await trackGeneration({
+        type: 'user_story',
+        template: template,
+        input: featureDescription,
+        output: story,
+        success: true
+      });
+
+      // Update count
+      const newCount = await getSessionGenerationCountByType('user_story');
+      setGenerationCount(newCount);
+
+      // Show warning if approaching limit
+      if (newCount === 3) {
+        setTimeout(() => {
+          alert('💡 You have 2 free generations left. Sign up for unlimited access!');
+        }, 500);
+      } else if (newCount === 4) {
+        setTimeout(() => {
+          alert('⚠️ This is your last free generation. Sign up to keep creating!');
+        }, 500);
+      }
     }, 2000);
   };
 
@@ -84,7 +122,7 @@ TESTING NOTES:
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-8">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-8 pt-24">
       <div className="max-w-4xl mx-auto">
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-gray-800 mb-2">
@@ -94,6 +132,34 @@ TESTING NOTES:
             Transform feature ideas into structured user stories in seconds
           </p>
         </div>
+
+        {/* Generation Counter */}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+  <div className="flex justify-between items-center mb-2">
+    <span className="text-blue-800 font-semibold">
+      Free User Stories: {generationCount} / 5 used
+    </span>
+    <span className="text-blue-600 text-sm">
+      {5 - generationCount} remaining
+    </span>
+  </div>
+  <div className="w-full bg-blue-200 rounded-full h-2">
+    <div 
+      className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+      style={{ width: `${(generationCount / 5) * 100}%` }}
+    />
+  </div>
+  {generationCount >= 3 && generationCount < 5 && (
+    <p className="text-xs text-blue-700 mt-2">
+      ⚡ You're almost at the limit! Sign up for unlimited user stories + 5 free PRDs.
+    </p>
+  )}
+  {generationCount >= 5 && (
+    <p className="text-xs text-blue-700 mt-2 font-semibold">
+      🎉 User story limit reached! You still have 5 free PRD generations. Sign up for unlimited!
+    </p>
+  )}
+</div>
 
         <div className="bg-white rounded-lg shadow-lg p-8 mb-6">
           <div className="mb-6">
@@ -128,10 +194,10 @@ TESTING NOTES:
 
           <button
             onClick={generateStory}
-            disabled={isGenerating}
+            disabled={isGenerating || generationCount >= 5}
             className="w-full bg-indigo-600 text-white font-semibold py-3 px-6 rounded-lg hover:bg-indigo-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
           >
-            {isGenerating ? 'Generating...' : '🚀 Generate User Story'}
+            {isGenerating ? 'Generating...' : generationCount >= 5 ? '🔒 Limit Reached - Sign Up' : '🚀 Generate User Story'}
           </button>
         </div>
 
