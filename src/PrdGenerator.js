@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { trackGeneration, getSessionGenerationCountbyType, getSessionGenerationCountByType } from './analytics';
 
 export default function PrdGenerator() {
   const [formData, setFormData] = useState({
@@ -27,6 +28,8 @@ export default function PrdGenerator() {
     risks: '',
     successCriteria: ''
   });
+
+ const [generationCount, setGenerationCount] = useState(0);
 
   const businessGoals = {
     revenue: '💰 Increase Revenue',
@@ -84,6 +87,12 @@ Viral Coefficient`
     onepager: 'One-Pager (Quick)'
   };
 
+   useEffect(() => {
+    // Load generation count on mount
+    getSessionGenerationCountByType('prd').then(count => setGenerationCount(count));
+  }, []);
+
+
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
     
@@ -108,9 +117,14 @@ Viral Coefficient`
       return;
     }
 
+    // Check if user hit the limit (5 free tries)
+    if (generationCount >= 5) {
+      alert('🎉 You\'ve used your 5 free tries! Sign up to continue generating unlimited PRDs.');
+      return;
+    }
     setIsGenerating(true);
 
-    setTimeout(() => {
+     setTimeout(async () => {
       const date = new Date().toLocaleDateString();
       let prd = `# PRODUCT REQUIREMENTS DOCUMENT
 ## ${formData.productName}
@@ -207,6 +221,26 @@ ${formData.successCriteria || 'Month 1: 500 users, Month 3: $5K MRR, Month 6: $1
 
       setGeneratedPrd(prd);
       setIsGenerating(false);
+      
+      await trackGeneration({
+      type: 'prd',
+      template: template,
+      businessGoal: formData.businessGoal === 'custom' ? formData.customGoal : formData.businessGoal,
+      input: formData.problemStatement,
+      output: prd,
+      success: true
+    });
+
+    const newCount = await getSessionGenerationCountByType('prd');
+    setGenerationCount(newCount);
+
+    if (newCount === 3) {
+      setTimeout(() => alert('💡 You have 2 free generations left!'), 500);
+    } else if (newCount === 4) {
+      setTimeout(() => alert('⚠️ This is your last free generation!'), 500);
+    }
+
+
     }, 2500);
   };
 
@@ -224,9 +258,31 @@ ${formData.successCriteria || 'Month 1: 500 users, Month 3: $5K MRR, Month 6: $1
     element.click();
     document.body.removeChild(element);
   };
+//adding counter
+<div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-6">
+  <div className="flex justify-between items-center mb-2">
+    <span className="text-purple-800 font-semibold">
+      Free Trial: {generationCount} / 5 generations used
+    </span>
+    <span className="text-purple-600 text-sm">
+      {5 - generationCount} remaining
+    </span>
+  </div>
+  <div className="w-full bg-purple-200 rounded-full h-2">
+    <div 
+      className="bg-purple-600 h-2 rounded-full transition-all duration-300"
+      style={{ width: `${(generationCount / 5) * 100}%` }}
+    />
+  </div>
+  {generationCount >= 3 && generationCount < 5 && (
+    <p className="text-xs text-purple-700 mt-2">
+      ⚡ You're almost at the limit! Sign up for unlimited PRDs.
+    </p>
+  )}
+</div>
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-100 p-8">
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-100 p-8 pt-24">
       <div className="max-w-6xl mx-auto">
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-gray-800 mb-2">
@@ -236,6 +292,35 @@ ${formData.successCriteria || 'Month 1: 500 users, Month 3: $5K MRR, Month 6: $1
             Transform product ideas into comprehensive PRDs in seconds
           </p>
         </div>
+
+        {/* add banner for counter */}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+  <div className="flex justify-between items-center mb-2">
+    <span className="text-blue-800 font-semibold">
+      Free User Stories: {generationCount} / 5 used
+    </span>
+    <span className="text-blue-600 text-sm">
+      {5 - generationCount} remaining
+    </span>
+  </div>
+  <div className="w-full bg-blue-200 rounded-full h-2">
+    <div 
+      className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+      style={{ width: `${(generationCount / 5) * 100}%` }}
+    />
+  </div>
+  {generationCount >= 3 && generationCount < 5 && (
+    <p className="text-xs text-blue-700 mt-2">
+      {/* Feedback message */}
+      ⚡ You're almost at the limit! Sign up for unlimited user stories + 5 free PRDs.
+    </p>
+  )}
+  {generationCount >= 5 && (
+    <p className="text-xs text-blue-700 mt-2 font-semibold">
+      🎉 User story limit reached! You still have 5 free PRD generations. Sign up for unlimited!
+    </p>
+  )}
+</div>
 
         <div className="bg-white rounded-lg shadow-lg p-8 mb-6">
           <div className="mb-6">
@@ -694,7 +779,7 @@ ${formData.successCriteria || 'Month 1: 500 users, Month 3: $5K MRR, Month 6: $1
 
           <button
             onClick={generatePrd}
-            disabled={isGenerating}
+            disabled={isGenerating || generationCount >= 5}
             className="w-full bg-purple-600 text-white font-semibold py-4 px-6 rounded-lg hover:bg-purple-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed text-lg"
           >
             {isGenerating ? 'Generating PRD...' : '🚀 Generate Comprehensive PRD'}
