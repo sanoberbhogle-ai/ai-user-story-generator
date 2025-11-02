@@ -2,36 +2,28 @@ import React, { useState, useEffect } from 'react';
 import { trackGenerationWithTokens, getSessionGenerationCountByType } from './analytics';
 import { callClaudeAPI, validateContent, calculateCost } from './claudeService';
 import { generatePRDPrompt } from './prompts';
+import { getNotionConfig, batchCreatePages } from './notionService';
 
 export default function PrdGenerator() {
   const [formData, setFormData] = useState({
     productName: '',
     problemStatement: '',
     businessGoal: '',
-    customGoal: '',
-    targetUsersPrimary: '',
-    targetUsersSecondary: '',
-    narrative: '',
-    impactSizing: '',
-    metrics: '',
-    knownInfo: '',
-    goals: '',
-    nonGoals: '',
-    highLevelApproach: '',
-    solutionAlignment: '',
-    keyFeatures: '',
-    futureConsiderations: '',
-    keyFlows: '',
-    keyLogic: '',
-    technicalReqs: '',
-    dependencies: '',
-    launchPlan: '',
-    milestones: '',
-    risks: '',
-    successCriteria: ''
+    customGoal: ''
   });
 
- const [generationCount, setGenerationCount] = useState(0);
+  const [uploadedDocuments, setUploadedDocuments] = useState([]);
+  const [generationCount, setGenerationCount] = useState(0);
+
+  // Workflow state for generating user stories from PRD
+  const [generatedUserStories, setGeneratedUserStories] = useState([]);
+  const [isGeneratingStories, setIsGeneratingStories] = useState(false);
+  const [workflowStoryCount, setWorkflowStoryCount] = useState(0);
+
+  // Notion integration state
+  const [isPushingToNotion, setIsPushingToNotion] = useState(false);
+  const [notionPushProgress, setNotionPushProgress] = useState(null);
+  const [notionPushResults, setNotionPushResults] = useState(null);
 
   const businessGoals = {
     revenue: '💰 Increase Revenue',
@@ -43,51 +35,8 @@ export default function PrdGenerator() {
     custom: '✏️ Custom Goal (Define Your Own)'
   };
 
-  const suggestedMetrics = {
-    revenue: `Monthly Recurring Revenue (MRR)
-Average Revenue Per User (ARPU)
-Conversion Rate to Paid
-Upsell/Cross-sell Rate`,
-    enterprise: `Enterprise Customer Count ($10K+ contracts)
-Average Contract Value (ACV)
-Sales Cycle Length
-Enterprise Win Rate`,
-    delight: `Net Promoter Score (NPS)
-Customer Satisfaction Score (CSAT)
-Feature Adoption Rate
-Time on Platform`,
-    engagement: `Weekly Active Users (WAU)
-Daily Active Users (DAU)
-Session Duration
-Feature Usage Frequency`,
-    infrastructure: `System Uptime %
-Mean Time to Recovery (MTTR)
-Bug/Incident Count
-Page Load Speed`,
-    acquisition: `New User Sign-ups
-Activation Rate (% completing key action)
-Cost Per Acquisition (CPA)
-Viral Coefficient`
-  };
-
-  const [openSections, setOpenSections] = useState({
-    section1: true,
-    section2: false,
-    section3: false,
-    section4: false,
-    section5: false
-  });
-
-  const [template, setTemplate] = useState('comprehensive');
   const [generatedPrd, setGeneratedPrd] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-
-  const templates = {
-    comprehensive: 'Comprehensive PRD (All Sections)',
-    executive: 'Executive Summary (C-Suite)',
-    technical: 'Technical Spec (Engineering)',
-    onepager: 'One-Pager (Quick)'
-  };
 
    useEffect(() => {
     // Load generation count on mount
@@ -97,20 +46,32 @@ Viral Coefficient`
 
   const handleInputChange = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
-    
-    // Auto-populate metrics when business goal changes
-    if (field === 'businessGoal' && value && value !== 'custom' && suggestedMetrics[value]) {
-      setFormData(prev => ({ ...prev, metrics: suggestedMetrics[value] }));
-    }
-    
-    // Clear metrics when switching to custom (AI will suggest later)
-    if (field === 'businessGoal' && value === 'custom') {
-      setFormData(prev => ({ ...prev, metrics: '' }));
-    }
   };
 
-  const toggleSection = (section) => {
-    setOpenSections(prev => ({ ...prev, [section]: !prev[section] }));
+  const handleFileUpload = async (e) => {
+    const files = Array.from(e.target.files);
+    const newDocs = [];
+
+    for (const file of files) {
+      try {
+        const text = await file.text();
+        newDocs.push({
+          name: file.name,
+          content: text,
+          size: file.size,
+          type: file.type
+        });
+      } catch (error) {
+        console.error('Error reading file:', file.name, error);
+        alert(`Could not read file: ${file.name}`);
+      }
+    }
+
+    setUploadedDocuments(prev => [...prev, ...newDocs]);
+  };
+
+  const removeDocument = (index) => {
+    setUploadedDocuments(prev => prev.filter((_, i) => i !== index));
   };
 
   
@@ -120,16 +81,18 @@ Viral Coefficient`
     return;
   }
 
-  if (generationCount >= 5) {
-    alert('🎉 You\'ve used your 5 free PRDs!\n\n💡 Good news: You still have 5 free User Story generations!\n\nTry the User Story Generator or sign up for unlimited access to both.');
+  console.log('🔍 Current generation count before check:', generationCount);
+
+  if (generationCount >= 3) {
+    alert('🎉 You\'ve used your 3 free PRDs!\n\n💡 Good news: You still have 5 free User Story generations!\n\nTry the User Story Generator or sign up for unlimited access to both.');
     return;
   }
 
   setIsGenerating(true);
 
   try {
-    // Generate prompt
-    const prompt = generatePRDPrompt(formData, template);
+    // Generate prompt with uploaded documents
+    const prompt = generatePRDPrompt(formData, uploadedDocuments);
     
     // Call Claude API
     const response = await callClaudeAPI(prompt, 3000); // PRDs need more tokens
@@ -150,7 +113,7 @@ Viral Coefficient`
     // Track with full data
     await trackGenerationWithTokens({
       type: 'prd',
-      template: template,
+      template: 'comprehensive',
       businessGoal: formData.businessGoal === 'custom' ? formData.customGoal : formData.businessGoal,
       input: formData.problemStatement,
       output: response.content,
@@ -163,13 +126,14 @@ Viral Coefficient`
 
     // Update count
     const newCount = await getSessionGenerationCountByType('prd');
+    console.log('📊 New count after generation:', newCount);
     setGenerationCount(newCount);
 
     // Show warnings
-    if (newCount === 3) {
-      setTimeout(() => alert('💡 You have 2 free PRDs left!'), 500);
-    } else if (newCount === 4) {
-      setTimeout(() => alert('⚠️ This is your last free PRD!'), 500);
+    if (newCount === 2) {
+      setTimeout(() => alert('💡 You have 1 free PRD left!'), 500);
+    } else if (newCount === 3) {
+      setTimeout(() => alert('⚠️ This was your last free PRD! Try the User Story Generator or sign up for unlimited access.'), 500);
     }
 
     console.log('💰 Generation cost: $' + cost.toFixed(4));
@@ -181,9 +145,91 @@ Viral Coefficient`
   }
 };
 
+  const generateUserStoriesFromPRD = async () => {
+    if (!generatedPrd) {
+      alert('Please generate a PRD first!');
+      return;
+    }
+
+    setIsGeneratingStories(true);
+    setGeneratedUserStories([]);
+    setWorkflowStoryCount(0);
+
+    try {
+      // Ask AI to extract features and generate user stories in batch
+      const prompt = `You are an expert Product Manager. Analyze the following PRD and generate user stories for the key features.
+
+PRD:
+${generatedPrd}
+
+---
+
+INSTRUCTIONS:
+1. Extract the key features from the PRD (from Section 3 or Key Features section)
+2. Generate user stories for these features, prioritizing the most important ones first
+3. Generate UP TO 10 user stories total across all features
+4. If a feature needs many stories, generate what's most important and move to the next feature to reach the 10 total limit
+5. Format each user story using the Scrum format:
+
+**User Story [N]:**
+As a [type of user],
+I want [an action/feature],
+So that [benefit/value].
+
+**Acceptance Criteria:**
+- [Criterion 1]
+- [Criterion 2]
+- [Criterion 3]
+
+**Feature:** [Which feature from PRD this relates to]
+
+**Estimated Story Points:** [1, 2, 3, 5, or 8]
+
+---
+
+Generate exactly 10 user stories (or fewer if PRD has limited features). Separate each story with "---STORY_SEPARATOR---" so they can be parsed.`;
+
+      const response = await callClaudeAPI(prompt, 4000);
+
+      // Parse the response to extract individual stories
+      const stories = response.content.split('---STORY_SEPARATOR---').map(s => s.trim()).filter(s => s.length > 0);
+
+      setGeneratedUserStories(stories);
+      setWorkflowStoryCount(stories.length);
+
+      // Track this workflow generation
+      await trackGenerationWithTokens({
+        type: 'user_story_workflow',
+        template: 'workflow_batch',
+        businessGoal: formData.businessGoal === 'custom' ? formData.customGoal : formData.businessGoal,
+        input: 'PRD-based workflow',
+        output: `Generated ${stories.length} user stories from PRD`,
+        success: true,
+        tokensUsed: response.usage,
+        cost: calculateCost(response.usage),
+        model: response.model,
+        validationScore: 1
+      });
+
+      setIsGeneratingStories(false);
+      alert(`✅ Successfully generated ${stories.length} user stories from your PRD!`);
+
+    } catch (error) {
+      console.error('Error generating user stories from PRD:', error);
+      setIsGeneratingStories(false);
+      alert(`Error: ${error.message}\n\nPlease try again or check your API configuration.`);
+    }
+  };
+
   const copyToClipboard = () => {
     navigator.clipboard.writeText(generatedPrd);
     alert('PRD copied to clipboard!');
+  };
+
+  const copyStoriesToClipboard = () => {
+    const allStories = generatedUserStories.join('\n\n---\n\n');
+    navigator.clipboard.writeText(allStories);
+    alert('All user stories copied to clipboard!');
   };
 
   const downloadPrd = () => {
@@ -194,6 +240,54 @@ Viral Coefficient`
     document.body.appendChild(element);
     element.click();
     document.body.removeChild(element);
+  };
+
+  const downloadUserStories = () => {
+    const allStories = generatedUserStories.join('\n\n---\n\n');
+    const element = document.createElement('a');
+    const file = new Blob([allStories], { type: 'text/plain' });
+    element.href = URL.createObjectURL(file);
+    element.download = `${formData.productName.replace(/\s+/g, '-')}-UserStories.md`;
+    document.body.appendChild(element);
+    element.click();
+    document.body.removeChild(element);
+  };
+
+  const pushToNotion = async () => {
+    // Check if Notion is configured
+    const config = getNotionConfig();
+    if (!config.token || !config.databaseId) {
+      alert('⚠️ Notion integration not configured!\n\nPlease go to the Admin Dashboard and set up your Notion integration token and database ID first.');
+      return;
+    }
+
+    if (generatedUserStories.length === 0) {
+      alert('No user stories to push! Please generate user stories first.');
+      return;
+    }
+
+    setIsPushingToNotion(true);
+    setNotionPushProgress({ current: 0, total: generatedUserStories.length, success: 0, failed: 0 });
+    setNotionPushResults(null);
+
+    try {
+      const results = await batchCreatePages(generatedUserStories, (progress) => {
+        setNotionPushProgress(progress);
+      });
+
+      setNotionPushResults(results);
+      setIsPushingToNotion(false);
+
+      if (results.failed === 0) {
+        alert(`✅ Success! All ${results.success} user stories have been pushed to Notion!`);
+      } else {
+        alert(`⚠️ Partially successful:\n✅ ${results.success} stories pushed successfully\n❌ ${results.failed} stories failed\n\nCheck the details below for more information.`);
+      }
+    } catch (error) {
+      console.error('Error pushing to Notion:', error);
+      setIsPushingToNotion(false);
+      alert(`❌ Error pushing to Notion: ${error.message}\n\nPlease check your Notion configuration in the Admin Dashboard.`);
+    }
   };
 //adding counter
 <div className="bg-purple-50 border border-purple-200 rounded-lg p-4 mb-6">
@@ -219,75 +313,57 @@ Viral Coefficient`
 </div>
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-100 p-8 pt-24">
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-100 px-6 py-4">
       <div className="max-w-6xl mx-auto">
-        <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-800 mb-2">
+        <div className="text-center mb-4">
+          <h1 className="text-2xl font-bold text-gray-800 mb-1">
             📋 AI PRD Generator
           </h1>
-          <p className="text-gray-600">
+          <p className="text-sm text-gray-600">
             Transform product ideas into comprehensive PRDs in seconds
           </p>
         </div>
 
-        {/* add banner for counter */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
-  <div className="flex justify-between items-center mb-2">
-    <span className="text-blue-800 font-semibold">
-      Free User Stories: {generationCount} / 5 used
-    </span>
-    <span className="text-blue-600 text-sm">
-      {5 - generationCount} remaining
-    </span>
-  </div>
-  <div className="w-full bg-blue-200 rounded-full h-2">
-    <div 
-      className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-      style={{ width: `${(generationCount / 5) * 100}%` }}
-    />
-  </div>
-  {generationCount >= 3 && generationCount < 5 && (
-    <p className="text-xs text-blue-700 mt-2">
-      {/* Feedback message */}
-      ⚡ You're almost at the limit! Sign up for unlimited user stories + 5 free PRDs.
-    </p>
-  )}
-  {generationCount >= 5 && (
-    <p className="text-xs text-blue-700 mt-2 font-semibold">
-      🎉 User story limit reached! You still have 5 free PRD generations. Sign up for unlimited!
-    </p>
-  )}
-</div>
-
-        <div className="bg-white rounded-lg shadow-lg p-8 mb-6">
-          <div className="mb-6">
-            <label className="block text-sm font-semibold text-gray-700 mb-2">
-              Select PRD Template
-            </label>
-            <select
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-              value={template}
-              onChange={(e) => setTemplate(e.target.value)}
-            >
-              {Object.entries(templates).map(([key, label]) => (
-                <option key={key} value={key}>
-                  {label}
-                </option>
-              ))}
-            </select>
+        {/* PRD Generation Counter */}
+        <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 mb-4">
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-purple-800 font-semibold">
+              Free PRDs: {generationCount} / 3 used
+            </span>
+            <span className="text-purple-600 text-sm">
+              {3 - generationCount} remaining
+            </span>
           </div>
+          <div className="w-full bg-purple-200 rounded-full h-2">
+            <div
+              className="bg-purple-600 h-2 rounded-full transition-all duration-300"
+              style={{ width: `${(generationCount / 3) * 100}%` }}
+            />
+          </div>
+          {generationCount >= 2 && generationCount < 3 && (
+            <p className="text-xs text-purple-700 mt-2">
+              ⚡ You're almost at the limit! Sign up for unlimited PRDs.
+            </p>
+          )}
+          {generationCount >= 3 && (
+            <p className="text-xs text-purple-700 mt-2 font-semibold">
+              🎉 PRD limit reached! You still have 5 free User Story generations. Sign up for unlimited!
+            </p>
+          )}
+        </div>
 
-          <div className="bg-purple-50 border-2 border-purple-200 rounded-lg p-6 mb-6">
-            <h3 className="font-bold text-purple-900 mb-4 text-lg">📝 Required Fields</h3>
-            
-            <div className="space-y-4">
+        <div className="bg-white rounded-lg shadow-lg p-5 mb-4">
+          <div className="bg-purple-50 border-2 border-purple-200 rounded-lg p-4 mb-4">
+            <h3 className="font-bold text-purple-900 mb-3 text-base">📝 Required Fields</h3>
+
+            <div className="space-y-3">
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                <label className="block text-sm font-semibold text-gray-700 mb-1">
                   Product/Feature Name *
                 </label>
                 <input
                   type="text"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 text-sm"
                   placeholder="e.g., AI User Story Generator"
                   value={formData.productName}
                   onChange={(e) => handleInputChange('productName', e.target.value)}
@@ -295,24 +371,24 @@ Viral Coefficient`
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                <label className="block text-sm font-semibold text-gray-700 mb-1">
                   Problem Statement *
                 </label>
                 <textarea
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 resize-none"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 resize-none text-sm"
                   rows="3"
-                  placeholder="Describe the problem in 1-2 sentences"
+                  placeholder="Describe the problem your product will solve..."
                   value={formData.problemStatement}
                   onChange={(e) => handleInputChange('problemStatement', e.target.value)}
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Business Goal * <span className="text-xs text-gray-500">(metrics will auto-populate)</span>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                  Business Goal *
                 </label>
                 <select
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
                   value={formData.businessGoal}
                   onChange={(e) => handleInputChange('businessGoal', e.target.value)}
                 >
@@ -323,400 +399,65 @@ Viral Coefficient`
                     </option>
                   ))}
                 </select>
-                
+
                 {/* Custom Goal Input */}
                 {formData.businessGoal === 'custom' && (
                   <div className="mt-3">
                     <input
                       type="text"
                       className="w-full px-4 py-3 border border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-500 bg-purple-50"
-                      placeholder="e.g., Reduce customer support costs by 40%, Improve API developer experience, etc."
+                      placeholder="e.g., Reduce customer support costs by 40%"
                       value={formData.customGoal}
                       onChange={(e) => handleInputChange('customGoal', e.target.value)}
                     />
-                    <div className="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-800">
-                      🤖 <strong>AI Feature (Coming Soon):</strong> When connected to AI, the system will analyze your custom goal and suggest relevant metrics automatically!
-                    </div>
                   </div>
                 )}
-                
-                {formData.businessGoal && formData.businessGoal !== 'custom' && (
-                  <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800">
-                    💡 <strong>Suggested metrics for this goal have been auto-filled below.</strong> You can customize them in Section 1.
+              </div>
+
+              {/* Document Upload Section */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Upload Supporting Documents (Optional)
+                </label>
+                <p className="text-xs text-gray-500 mb-3">
+                  Upload any relevant documents (user research, competitive analysis, design docs, etc.) that the AI should reference when generating your PRD.
+                </p>
+                <input
+                  type="file"
+                  multiple
+                  accept=".txt,.md,.doc,.docx,.pdf"
+                  onChange={handleFileUpload}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-purple-50 file:text-purple-700 hover:file:bg-purple-100"
+                />
+
+                {/* Uploaded Documents List */}
+                {uploadedDocuments.length > 0 && (
+                  <div className="mt-4 space-y-2">
+                    <p className="text-sm font-semibold text-gray-700">Uploaded Documents:</p>
+                    {uploadedDocuments.map((doc, index) => (
+                      <div key={index} className="flex items-center justify-between bg-gray-50 p-3 rounded-lg">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-purple-600">📄</span>
+                          <span className="text-sm text-gray-700">{doc.name}</span>
+                          <span className="text-xs text-gray-500">({Math.round(doc.size / 1024)} KB)</span>
+                        </div>
+                        <button
+                          onClick={() => removeDocument(index)}
+                          className="text-red-600 hover:text-red-800 text-sm font-semibold"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
             </div>
           </div>
 
-          {/* SECTION 1 */}
-          <div className="border border-gray-200 rounded-lg mb-4">
-            <button
-              onClick={() => toggleSection('section1')}
-              className="w-full flex justify-between items-center p-4 bg-blue-50 hover:bg-blue-100 transition-colors rounded-t-lg"
-            >
-              <span className="font-bold text-blue-900 text-lg">
-                🎯 Section 1: The Opportunity (Why)
-              </span>
-              <span className="text-2xl text-blue-600">
-                {openSections.section1 ? '−' : '+'}
-              </span>
-            </button>
-            {openSections.section1 && (
-              <div className="p-6 space-y-4">
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Customer Narrative
-                  </label>
-                  <textarea
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 resize-none"
-                    rows="4"
-                    placeholder="Paint a picture of the customer experience"
-                    value={formData.narrative}
-                    onChange={(e) => handleInputChange('narrative', e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Impact Sizing Model
-                  </label>
-                  <textarea
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 resize-none"
-                    rows="4"
-                    placeholder="Show calculation for revenue impact"
-                    value={formData.impactSizing}
-                    onChange={(e) => handleInputChange('impactSizing', e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Metrics {formData.businessGoal && formData.businessGoal !== 'custom' && (
-                      <span className="text-xs text-purple-600">(auto-populated based on business goal)</span>
-                    )}
-                  </label>
-                  <textarea
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 resize-none"
-                    rows="4"
-                    placeholder={formData.businessGoal === 'custom' 
-                      ? "Define your metrics here, or let AI suggest them when we connect AI tomorrow!" 
-                      : "First line: North star. Other lines: Secondary metrics"}
-                    value={formData.metrics}
-                    onChange={(e) => handleInputChange('metrics', e.target.value)}
-                  />
-                  {formData.businessGoal && formData.businessGoal !== 'custom' && (
-                    <p className="text-xs text-gray-500 mt-1">
-                      💡 These metrics were suggested based on your business goal. Feel free to customize!
-                    </p>
-                  )}
-                  {formData.businessGoal === 'custom' && formData.customGoal && (
-                    <p className="text-xs text-orange-600 mt-1">
-                      🚀 <strong>Tomorrow:</strong> AI will analyze "{formData.customGoal}" and suggest the perfect metrics!
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* SECTION 2 */}
-          <div className="border border-gray-200 rounded-lg mb-4">
-            <button
-              onClick={() => toggleSection('section2')}
-              className="w-full flex justify-between items-center p-4 bg-green-50 hover:bg-green-100 transition-colors rounded-t-lg"
-            >
-              <span className="font-bold text-green-900 text-lg">
-                👥 Section 2: The Customer (Who)
-              </span>
-              <span className="text-2xl text-green-600">
-                {openSections.section2 ? '−' : '+'}
-              </span>
-            </button>
-            {openSections.section2 && (
-              <div className="p-6 space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Primary Persona
-                    </label>
-                    <input
-                      type="text"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
-                      placeholder="e.g., Product Managers"
-                      value={formData.targetUsersPrimary}
-                      onChange={(e) => handleInputChange('targetUsersPrimary', e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
-                      Secondary Persona
-                    </label>
-                    <input
-                      type="text"
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500"
-                      placeholder="Optional"
-                      value={formData.targetUsersSecondary}
-                      onChange={(e) => handleInputChange('targetUsersSecondary', e.target.value)}
-                    />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Known Information & Research
-                  </label>
-                  <textarea
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500 resize-none"
-                    rows="4"
-                    placeholder="User interviews, insights, attachments"
-                    value={formData.knownInfo}
-                    onChange={(e) => handleInputChange('knownInfo', e.target.value)}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* SECTION 3 */}
-          <div className="border border-gray-200 rounded-lg mb-4">
-            <button
-              onClick={() => toggleSection('section3')}
-              className="w-full flex justify-between items-center p-4 bg-purple-50 hover:bg-purple-100 transition-colors rounded-t-lg"
-            >
-              <span className="font-bold text-purple-900 text-lg">
-                🎨 Section 3: The Solution (What)
-              </span>
-              <span className="text-2xl text-purple-600">
-                {openSections.section3 ? '−' : '+'}
-              </span>
-            </button>
-            {openSections.section3 && (
-              <div className="p-6 space-y-4">
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Goals
-                  </label>
-                  <textarea
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 resize-none"
-                    rows="4"
-                    placeholder="List goals in priority order"
-                    value={formData.goals}
-                    onChange={(e) => handleInputChange('goals', e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Non-Goals
-                  </label>
-                  <textarea
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 resize-none"
-                    rows="3"
-                    placeholder="What we are NOT building"
-                    value={formData.nonGoals}
-                    onChange={(e) => handleInputChange('nonGoals', e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    High Level Approach
-                  </label>
-                  <textarea
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 resize-none"
-                    rows="2"
-                    placeholder="Solution approach in a few sentences"
-                    value={formData.highLevelApproach}
-                    onChange={(e) => handleInputChange('highLevelApproach', e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Solution Alignment (Scope)
-                  </label>
-                  <textarea
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 resize-none"
-                    rows="3"
-                    placeholder="In scope vs out of scope"
-                    value={formData.solutionAlignment}
-                    onChange={(e) => handleInputChange('solutionAlignment', e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Key Features
-                  </label>
-                  <textarea
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 resize-none"
-                    rows="5"
-                    placeholder="P0, P1, P2 features"
-                    value={formData.keyFeatures}
-                    onChange={(e) => handleInputChange('keyFeatures', e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Future Considerations
-                  </label>
-                  <textarea
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 resize-none"
-                    rows="3"
-                    placeholder="v2, v3, long-term vision"
-                    value={formData.futureConsiderations}
-                    onChange={(e) => handleInputChange('futureConsiderations', e.target.value)}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* SECTION 4 */}
-          <div className="border border-gray-200 rounded-lg mb-4">
-            <button
-              onClick={() => toggleSection('section4')}
-              className="w-full flex justify-between items-center p-4 bg-orange-50 hover:bg-orange-100 transition-colors rounded-t-lg"
-            >
-              <span className="font-bold text-orange-900 text-lg">
-                ⚙️ Section 4: The Details (How)
-              </span>
-              <span className="text-2xl text-orange-600">
-                {openSections.section4 ? '−' : '+'}
-              </span>
-            </button>
-            {openSections.section4 && (
-              <div className="p-6 space-y-4">
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Key Flows
-                  </label>
-                  <textarea
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 resize-none"
-                    rows="5"
-                    placeholder="Screen-by-screen user flows"
-                    value={formData.keyFlows}
-                    onChange={(e) => handleInputChange('keyFlows', e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Key Logic & Edge Cases
-                  </label>
-                  <textarea
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 resize-none"
-                    rows="4"
-                    placeholder="Business rules, edge cases"
-                    value={formData.keyLogic}
-                    onChange={(e) => handleInputChange('keyLogic', e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Technical Requirements
-                  </label>
-                  <textarea
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 resize-none"
-                    rows="4"
-                    placeholder="Tech stack, performance targets"
-                    value={formData.technicalReqs}
-                    onChange={(e) => handleInputChange('technicalReqs', e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Dependencies & Integrations
-                  </label>
-                  <textarea
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 resize-none"
-                    rows="3"
-                    placeholder="External APIs, services"
-                    value={formData.dependencies}
-                    onChange={(e) => handleInputChange('dependencies', e.target.value)}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* SECTION 5 */}
-          <div className="border border-gray-200 rounded-lg mb-6">
-            <button
-              onClick={() => toggleSection('section5')}
-              className="w-full flex justify-between items-center p-4 bg-red-50 hover:bg-red-100 transition-colors rounded-t-lg"
-            >
-              <span className="font-bold text-red-900 text-lg">
-                📅 Section 5: The Execution (When)
-              </span>
-              <span className="text-2xl text-red-600">
-                {openSections.section5 ? '−' : '+'}
-              </span>
-            </button>
-            {openSections.section5 && (
-              <div className="p-6 space-y-4">
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Launch Plan
-                  </label>
-                  <textarea
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 resize-none"
-                    rows="5"
-                    placeholder="Beta phases, launch criteria, A/B tests"
-                    value={formData.launchPlan}
-                    onChange={(e) => handleInputChange('launchPlan', e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Key Milestones
-                  </label>
-                  <textarea
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 resize-none"
-                    rows="4"
-                    placeholder="Development timeline"
-                    value={formData.milestones}
-                    onChange={(e) => handleInputChange('milestones', e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Risks & Mitigation
-                  </label>
-                  <textarea
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 resize-none"
-                    rows="4"
-                    placeholder="Technical, market, operational risks"
-                    value={formData.risks}
-                    onChange={(e) => handleInputChange('risks', e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Success Criteria
-                  </label>
-                  <textarea
-                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 resize-none"
-                    rows="4"
-                    placeholder="Month 1, 3, 6 targets"
-                    value={formData.successCriteria}
-                    onChange={(e) => handleInputChange('successCriteria', e.target.value)}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
           <button
             onClick={generatePrd}
-            disabled={isGenerating || generationCount >= 5}
+            disabled={isGenerating || generationCount >= 3}
             className="w-full bg-purple-600 text-white font-semibold py-4 px-6 rounded-lg hover:bg-purple-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed text-lg"
           >
             {isGenerating ? 'Generating PRD...' : '🚀 Generate Comprehensive PRD'}
@@ -751,6 +492,135 @@ Viral Coefficient`
             </div>
             <div className="mt-4 text-sm text-gray-500 text-center">
               💡 Tip: Review and customize this PRD based on your specific needs
+            </div>
+
+            {/* Workflow Button: Generate User Stories */}
+            <div className="mt-6 p-4 bg-gradient-to-r from-indigo-50 to-purple-50 border-2 border-purple-200 rounded-lg">
+              <h3 className="font-bold text-purple-900 mb-2">🚀 Next Step: Generate User Stories</h3>
+              <p className="text-sm text-gray-700 mb-4">
+                Automatically extract key features from your PRD and generate up to 10 user stories ready for development!
+              </p>
+              <button
+                onClick={generateUserStoriesFromPRD}
+                disabled={isGeneratingStories}
+                className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-semibold py-3 px-6 rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+              >
+                {isGeneratingStories ? '✨ Generating User Stories...' : '✨ Generate User Stories for Key Features'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Generated User Stories Display */}
+        {generatedUserStories.length > 0 && (
+          <div className="bg-white rounded-lg shadow-lg p-8 mt-6">
+            <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
+              <h2 className="text-2xl font-bold text-gray-800">
+                📝 Generated User Stories ({workflowStoryCount})
+              </h2>
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  onClick={copyStoriesToClipboard}
+                  className="bg-green-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-green-700 transition-colors"
+                >
+                  📋 Copy All
+                </button>
+                <button
+                  onClick={downloadUserStories}
+                  className="bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-700 transition-colors"
+                >
+                  💾 Download
+                </button>
+                <button
+                  onClick={pushToNotion}
+                  disabled={isPushingToNotion}
+                  className="bg-purple-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-purple-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                >
+                  {isPushingToNotion ? '⏳ Pushing...' : '🔗 Push to Notion'}
+                </button>
+              </div>
+            </div>
+
+            {/* Notion Push Progress */}
+            {isPushingToNotion && notionPushProgress && (
+              <div className="mb-4 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-purple-800 font-semibold">
+                    Pushing to Notion...
+                  </span>
+                  <span className="text-purple-600">
+                    {notionPushProgress.current} / {notionPushProgress.total}
+                  </span>
+                </div>
+                <div className="w-full bg-purple-200 rounded-full h-2">
+                  <div
+                    className="bg-purple-600 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${(notionPushProgress.current / notionPushProgress.total) * 100}%` }}
+                  />
+                </div>
+                <div className="mt-2 text-sm text-purple-700">
+                  ✅ {notionPushProgress.success} successful | ❌ {notionPushProgress.failed} failed
+                </div>
+              </div>
+            )}
+
+            {/* Notion Push Results */}
+            {notionPushResults && (
+              <div className={`mb-4 p-4 rounded-lg border ${
+                notionPushResults.failed === 0
+                  ? 'bg-green-50 border-green-200'
+                  : 'bg-yellow-50 border-yellow-200'
+              }`}>
+                <div className="font-semibold mb-2">
+                  {notionPushResults.failed === 0 ? '✅ All stories pushed successfully!' : '⚠️ Push completed with some issues'}
+                </div>
+                <div className="text-sm">
+                  <div>✅ Successfully pushed: {notionPushResults.success}</div>
+                  {notionPushResults.failed > 0 && <div>❌ Failed: {notionPushResults.failed}</div>}
+                </div>
+                {notionPushResults.results && notionPushResults.results.some(r => r.success && r.data.url) && (
+                  <div className="mt-2">
+                    <a
+                      href={notionPushResults.results.find(r => r.success)?.data.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-600 hover:underline text-sm"
+                    >
+                      🔗 View in Notion
+                    </a>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-4">
+              {generatedUserStories.map((story, index) => (
+                <div key={index} className="bg-gray-50 border border-gray-200 rounded-lg p-6">
+                  <div className="flex justify-between items-start mb-3">
+                    <span className="bg-purple-600 text-white px-3 py-1 rounded-full text-sm font-semibold">
+                      Story #{index + 1}
+                    </span>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(story);
+                        alert(`Story #${index + 1} copied!`);
+                      }}
+                      className="text-purple-600 hover:text-purple-800 text-sm font-semibold"
+                    >
+                      📋 Copy
+                    </button>
+                  </div>
+                  <pre className="whitespace-pre-wrap text-sm text-gray-800 font-sans">
+                    {story}
+                  </pre>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-sm text-blue-800">
+                <strong>🎯 Ready for Development!</strong> These user stories are ready to be pushed to your project management tools (Notion, Jira, etc.)
+              </p>
             </div>
           </div>
         )}

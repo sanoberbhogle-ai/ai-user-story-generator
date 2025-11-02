@@ -71,105 +71,73 @@ So I can [expected outcome].
 }
 
 // PRD Prompt Generation
-export function generatePRDPrompt(formData) {
+export function generatePRDPrompt(formData, uploadedDocuments = []) {
   const {
     productName,
     problemStatement,
     businessGoal,
-    customGoal,
-    targetUsersPrimary,
-    targetUsersSecondary,
-    narrative,
-    impactSizing,
-    metrics,
-    knownInfo,
-    goals,
-    nonGoals,
-    highLevelApproach,
-    solutionAlignment,
-    keyFeatures,
-    futureConsiderations,
-    keyFlows,
-    keyLogic,
-    technicalReqs,
-    dependencies,
-    launchPlan,
-    milestones,
-    risks,
-    successCriteria
+    customGoal
   } = formData;
 
   const goalText = businessGoal === 'custom' ? customGoal : businessGoal;
 
+  // Build supporting documents section if any documents are uploaded
+  let documentsSection = '';
+  if (uploadedDocuments.length > 0) {
+    documentsSection = '\n\n## Supporting Documents\n\nThe following documents have been provided for context. Please analyze and reference them when generating the PRD:\n\n';
+    uploadedDocuments.forEach((doc, index) => {
+      documentsSection += `### Document ${index + 1}: ${doc.name}\n\`\`\`\n${doc.content}\n\`\`\`\n\n`;
+    });
+  }
+
   return `You are an expert Product Manager. Generate a comprehensive Product Requirements Document (PRD) based on the following information:
 
-# Product: ${productName || '[Product Name]'}
+# Product: ${productName}
 
 ## Problem Statement
-${problemStatement || '[Define the problem this product solves]'}
+${problemStatement}
 
 ## Business Goal
-${goalText || '[Define the business objective]'}
+${goalText}
+${documentsSection}
+---
 
-## Target Users
-**Primary:** ${targetUsersPrimary || '[Define primary users]'}
-**Secondary:** ${targetUsersSecondary || '[Define secondary users]'}
+**IMPORTANT INSTRUCTIONS:**
 
-## User/Business Narrative
-${narrative || '[Describe the user journey and business context]'}
+Please generate a comprehensive PRD that is well-structured into the following 5 sections. Use the provided information and any uploaded documents to create detailed, actionable content for each section:
 
-## Impact & Sizing
-${impactSizing || '[Estimate the potential impact and effort]'}
+## SECTION 1: THE OPPORTUNITY (Why)
+- Problem Statement (expand on what was provided)
+- Customer Narrative (describe the user journey and pain points)
+- Impact Sizing Model (estimate potential impact and revenue)
+- Success Metrics (define KPIs and how success will be measured)
 
-## Success Metrics
-${metrics || '[Define how success will be measured]'}
+## SECTION 2: THE CUSTOMER (Who)
+- Target Users (define primary and secondary personas)
+- User Research & Known Information (insights, constraints, requirements)
+- User Needs & Jobs to be Done
 
-## Known Information & Constraints
-${knownInfo || '[List any known constraints or requirements]'}
+## SECTION 3: THE SOLUTION (What)
+- Goals (what we want to achieve, in priority order)
+- Non-Goals (what is explicitly out of scope)
+- High-Level Approach (solution strategy)
+- Solution Alignment (how this aligns with company strategy, what's in/out of scope)
+- Key Features (P0, P1, P2 priorities)
+- Future Considerations (v2, v3, long-term vision)
 
-## Goals
-${goals || '[What we want to achieve]'}
+## SECTION 4: THE DETAILS (How)
+- Key User Flows (screen-by-screen flows)
+- Key Business Logic & Edge Cases (business rules, error handling)
+- Technical Requirements (tech stack, performance, security, scalability)
+- Dependencies & Integrations (external APIs, systems, teams)
 
-## Non-Goals
-${nonGoals || '[What is explicitly out of scope]'}
-
-## High-Level Approach
-${highLevelApproach || '[Describe the general solution approach]'}
-
-## Solution Alignment
-${solutionAlignment || '[How this aligns with company strategy]'}
-
-## Key Features
-${keyFeatures || '[List the main features to build]'}
-
-## Future Considerations
-${futureConsiderations || '[What might come in future iterations]'}
-
-## Key User Flows
-${keyFlows || '[Describe critical user flows]'}
-
-## Key Business Logic
-${keyLogic || '[Describe important business rules]'}
-
-## Technical Requirements
-${technicalReqs || '[List technical specifications]'}
-
-## Dependencies
-${dependencies || '[List any dependencies on other systems/teams]'}
-
-## Launch Plan
-${launchPlan || '[Describe rollout strategy]'}
-
-## Milestones
-${milestones || '[Key dates and checkpoints]'}
-
-## Risks & Mitigations
-${risks || '[Identify risks and how to address them]'}
-
-## Success Criteria
-${successCriteria || '[Final acceptance criteria]'}
+## SECTION 5: THE EXECUTION (When)
+- Launch Plan (beta phases, launch criteria, rollout strategy)
+- Key Milestones (development timeline with dates)
+- Risks & Mitigation Strategies (technical, market, operational risks)
+- Success Criteria (Month 1, 3, 6 targets)
 
 ---
 
-Based on the above information, generate a well-structured, comprehensive PRD that fills in any gaps, provides detailed specifications, and ensures all stakeholders have a clear understanding of what needs to be built. Make it actionable and specific.`;
+Generate a detailed, professional PRD following this structure. Fill in all sections comprehensively based on the problem statement, business goal, and any supporting documents provided. Make it actionable, specific, and ready for engineering and design teams to implement.`;
 }

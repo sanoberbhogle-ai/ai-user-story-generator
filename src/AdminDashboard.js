@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { getNotionConfig, saveNotionConfig, testNotionConnection } from './notionService';
 
 export default function AdminDashboard() {
   const [analytics, setAnalytics] = useState({
@@ -21,9 +22,57 @@ export default function AdminDashboard() {
 
   const [isLoading, setIsLoading] = useState(true);
 
+  // Notion integration state
+  const [notionToken, setNotionToken] = useState('');
+  const [notionDatabaseId, setNotionDatabaseId] = useState('');
+  const [notionStatus, setNotionStatus] = useState(null);
+  const [isTestingNotion, setIsTestingNotion] = useState(false);
+
   useEffect(() => {
     loadAnalytics();
+    loadNotionConfig();
   }, []);
+
+  const loadNotionConfig = () => {
+    const config = getNotionConfig();
+    if (config.token) setNotionToken(config.token);
+    if (config.databaseId) setNotionDatabaseId(config.databaseId);
+  };
+
+  const handleSaveNotionConfig = () => {
+    if (!notionToken || !notionDatabaseId) {
+      alert('Please enter both Notion token and database ID');
+      return;
+    }
+    saveNotionConfig(notionToken, notionDatabaseId);
+    setNotionStatus({ type: 'success', message: 'Notion configuration saved!' });
+    setTimeout(() => setNotionStatus(null), 3000);
+  };
+
+  const handleTestNotionConnection = async () => {
+    if (!notionToken || !notionDatabaseId) {
+      setNotionStatus({ type: 'error', message: 'Please save your configuration first' });
+      return;
+    }
+
+    setIsTestingNotion(true);
+    setNotionStatus(null);
+
+    try {
+      const result = await testNotionConnection();
+      setNotionStatus({
+        type: 'success',
+        message: `✅ Connected to database: "${result.databaseTitle}"`
+      });
+    } catch (error) {
+      setNotionStatus({
+        type: 'error',
+        message: `❌ Connection failed: ${error.message}`
+      });
+    } finally {
+      setIsTestingNotion(false);
+    }
+  };
 
   const loadAnalytics = async () => {
     try {
@@ -393,6 +442,99 @@ export default function AdminDashboard() {
           ) : (
             <div className="text-gray-500 text-center py-8">No activity yet</div>
           )}
+        </div>
+
+        {/* Notion Integration Configuration */}
+        <div className="mt-8 bg-gradient-to-r from-blue-900 to-indigo-900 rounded-lg p-6 border border-blue-700">
+          <h2 className="text-2xl font-bold mb-4">🔗 Notion Integration</h2>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-semibold mb-2 text-blue-200">
+                Integration Token
+              </label>
+              <input
+                type="password"
+                value={notionToken}
+                onChange={(e) => setNotionToken(e.target.value)}
+                placeholder="secret_..."
+                className="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                Get your token from{' '}
+                <a
+                  href="https://www.notion.so/my-integrations"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-400 hover:underline"
+                >
+                  https://www.notion.so/my-integrations
+                </a>
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold mb-2 text-blue-200">
+                Database ID
+              </label>
+              <input
+                type="text"
+                value={notionDatabaseId}
+                onChange={(e) => setNotionDatabaseId(e.target.value)}
+                placeholder="abc123..."
+                className="w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                Find the database ID in your Notion database URL: notion.so/workspace/<strong>DATABASE_ID</strong>?v=...
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                onClick={handleSaveNotionConfig}
+                className="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded-lg transition-colors font-semibold"
+              >
+                💾 Save Configuration
+              </button>
+              <button
+                onClick={handleTestNotionConnection}
+                disabled={isTestingNotion}
+                className="bg-green-600 hover:bg-green-700 disabled:bg-gray-600 px-6 py-2 rounded-lg transition-colors font-semibold"
+              >
+                {isTestingNotion ? '⏳ Testing...' : '🧪 Test Connection'}
+              </button>
+            </div>
+
+            {notionStatus && (
+              <div
+                className={`p-3 rounded-lg ${
+                  notionStatus.type === 'success'
+                    ? 'bg-green-900 text-green-200 border border-green-700'
+                    : 'bg-red-900 text-red-200 border border-red-700'
+                }`}
+              >
+                {notionStatus.message}
+              </div>
+            )}
+
+            <div className="mt-4 p-4 bg-blue-950 rounded-lg">
+              <h3 className="font-semibold mb-2 text-blue-200">📝 Setup Instructions:</h3>
+              <ol className="text-sm space-y-2 text-gray-300 list-decimal list-inside">
+                <li>Go to <a href="https://www.notion.so/my-integrations" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">Notion Integrations</a> and create a new integration</li>
+                <li>Copy the "Internal Integration Token"</li>
+                <li>Create a database in Notion with these properties:
+                  <ul className="ml-6 mt-1 space-y-1 list-disc">
+                    <li><strong>Name</strong> (Title) - Story title</li>
+                    <li><strong>Type</strong> (Select) - Options: scrum, jtbd, simple</li>
+                    <li><strong>Story Points</strong> (Number) - For scrum stories</li>
+                    <li><strong>Priority</strong> (Select) - Options: P0, P1, P2</li>
+                    <li><strong>Status</strong> (Select) - Options: To Do, In Progress, Done</li>
+                  </ul>
+                </li>
+                <li>Share your database with the integration (click "..." → "Add connections")</li>
+                <li>Copy the database ID from the URL and paste both credentials above</li>
+              </ol>
+            </div>
+          </div>
         </div>
 
         {/* Interview Stats Box */}

@@ -5,7 +5,7 @@ import AdminDashboard from './AdminDashboard';
 import { trackSession } from './analytics';
 
 export default function App() {
-  const [currentTool, setCurrentTool] = useState('user-stories');
+  const [currentTool, setCurrentTool] = useState('prd');
 
   useEffect(() => {
     // Track session on app load
@@ -53,36 +53,36 @@ export default function App() {
   return (
     <div>
       {/* Navigation */}
-      <div className="bg-gray-800 text-white py-4 px-8">
-        <div className="max-w-5xl mx-auto flex justify-between items-center">
+      <div className="bg-gray-800 text-white py-3 px-6 shadow-lg">
+        <div className="max-w-7xl mx-auto flex justify-between items-center flex-wrap gap-3">
           <h1 className="text-xl font-bold">AI PM Tools by Sanober</h1>
-          <div className="flex gap-4 items-center">
-            <button
-              onClick={() => setCurrentTool('user-stories')}
-              className={`px-4 py-2 rounded-lg transition-colors ${
-                currentTool === 'user-stories'
-                  ? 'bg-indigo-600'
-                  : 'bg-gray-700 hover:bg-gray-600'
-              }`}
-            >
-              📝 User Stories
-            </button>
+          <div className="flex gap-3 items-center flex-wrap">
             <button
               onClick={() => setCurrentTool('prd')}
-              className={`px-4 py-2 rounded-lg transition-colors ${
+              className={`px-4 py-2 rounded-lg transition-colors font-semibold ${
                 currentTool === 'prd'
-                  ? 'bg-purple-600'
+                  ? 'bg-purple-600 shadow-lg'
                   : 'bg-gray-700 hover:bg-gray-600'
               }`}
             >
               📋 PRD Generator
             </button>
             <button
+              onClick={() => setCurrentTool('user-stories')}
+              className={`px-4 py-2 rounded-lg transition-colors font-semibold ${
+                currentTool === 'user-stories'
+                  ? 'bg-indigo-600 shadow-lg'
+                  : 'bg-gray-700 hover:bg-gray-600'
+              }`}
+            >
+              📝 User Stories
+            </button>
+            <button
               onClick={handleAdminAccess}
-              className="bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded-lg text-xs"
+              className="bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded-lg text-sm"
               title="Admin Dashboard"
             >
-              👤
+              👤 Admin
             </button>
           </div>
         </div>
